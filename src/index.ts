@@ -1,7 +1,8 @@
-import { buildApp } from './app/app';
+// Boots the Fastify server with the configured host and port.
+import { buildServer } from './app/server';
 import { env } from './config/env';
 
-const app = buildApp();
+const app = buildServer();
 
 const start = async () => {
   try {
