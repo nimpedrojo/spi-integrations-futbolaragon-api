@@ -10,6 +10,17 @@
 - Temporada: `[PENDIENTE: completar manualmente]`
 - Categoría/Grupo: `[PENDIENTE: completar manualmente]`
 
+## Cómo rellenar el campo `Resultado`
+- Documenta **qué pantalla o estado concreto** obtienes tras la acción (no solo "ok" o "carga").
+- Incluye, cuando aplique, estos elementos observables:
+  - Nombre visible de la vista/módulo (ej.: "Detalle de competición", "Listado de jornadas", "Clasificación").
+  - Evidencia de contexto (equipo, competición, temporada, grupo) tal como aparece en UI.
+  - Tipo de dato disponible en esa pantalla (tabla, tarjetas, filtros, selector de jornada, etc.).
+  - Comportamiento de navegación (si redirige, abre modal, cambia query params, requiere login, muestra error).
+- Si el paso no se puede completar, anota el bloqueo real (permiso, 404, sesión expirada, dato no visible, etc.).
+- Formato sugerido: `Vista alcanzada + evidencia + cambio de estado`.
+  - Ejemplo (plantilla): `Se abre [Nombre vista], mostrando [evidencia], y la URL queda en [ruta/query].`
+
 ## Flujo público
 
 ### Paso 1
