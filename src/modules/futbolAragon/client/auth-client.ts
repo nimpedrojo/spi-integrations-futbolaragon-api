@@ -1,20 +1,15 @@
-// Encapsulates access to the authenticated Futbol Aragon portal.
-import { env } from '../../../config/env';
-import { createSourceSnapshot } from '../types/source.types';
+// Placeholder kept only to preserve the planned architecture; authenticated access is not used in this spike.
 import { SourceAccessContext, SourceSnapshot } from '../types/source.types';
 import { SessionManager } from './session-manager';
 
 export class AuthFutbolAragonClient {
-  constructor(private readonly sessionManager: SessionManager) {}
+  constructor(private readonly sessionManager: SessionManager) {
+    void this.sessionManager;
+  }
 
   async fetchTeamSnapshot(context: SourceAccessContext): Promise<SourceSnapshot> {
-    const session = await this.sessionManager.getAuthenticatedSession();
+    void context;
 
-    return createSourceSnapshot({
-      teamSlug: context.sourceTeamSlug,
-      accessMode: 'authenticated',
-      baseUrl: env.futbolAragonAuthBaseUrl || 'https://auth.futbolaragon.example',
-      sessionToken: session.token,
-    });
+    throw new Error('Authenticated Futbol Aragon access is intentionally disabled for this spike');
   }
 }

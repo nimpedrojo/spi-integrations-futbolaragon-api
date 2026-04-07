@@ -1,5 +1,37 @@
 // Defines the source-side contracts kept isolated from the internal domain model.
+export type SourceSystem = 'futbol-aragon';
 export type SourceAccessMode = 'public' | 'authenticated';
+export type RawCaptureEntityType =
+  | 'team-snapshot'
+  | 'competition-page'
+  | 'calendar-page'
+  | 'round-page'
+  | 'match-page'
+  | 'standings-page'
+  | 'unknown';
+export type RawCaptureParseStatus = 'pending' | 'parsed' | 'failed';
+
+export type RawCapturePayload = {
+  body: string;
+  sizeBytes: number;
+  encoding: 'utf8';
+  filePath?: string;
+};
+
+export type RawCaptureEvidence = {
+  sourceSystem: SourceSystem;
+  entityType: RawCaptureEntityType;
+  sourceUrl: string;
+  resolvedUrl: string;
+  accessMode: SourceAccessMode;
+  httpStatus?: number;
+  contentType?: string;
+  contentHash: string;
+  payload: RawCapturePayload;
+  capturedAt: string;
+  parseStatus: RawCaptureParseStatus;
+  errorMessage?: string;
+};
 
 export type SourceAccessContext = {
   clubId: string;
@@ -47,7 +79,7 @@ export type RawSourceStanding = {
 };
 
 export type SourceSnapshot = {
-  source: 'futbol-aragon';
+  source: SourceSystem;
   teamSlug: string;
   accessMode: SourceAccessMode;
   capturedAt: string;

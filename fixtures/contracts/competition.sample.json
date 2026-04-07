@@ -1,0 +1,10 @@
+{
+  "name": "COPA RFEF (Fase auton�mica)",
+  "url": "https://www.futbolaragon.com/pnfg/NPcd/NFG_CmpJornada?cod_primaria=1000120&CodCompeticion=22320177",
+  "query": {
+    "codPrimaria": 1000120,
+    "codCompeticion": 22320177
+  },
+  "optgroupLabel": "F�TBOL NACIONAL",
+  "selected": false
+}

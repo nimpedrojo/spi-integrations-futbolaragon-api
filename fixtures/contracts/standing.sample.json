@@ -1,0 +1,22 @@
+{
+  "position": 1,
+  "teamName": "SANTO D.SILOS-O.D.",
+  "points": 17,
+  "played": 7,
+  "won": 5,
+  "drawn": 2,
+  "lost": 0,
+  "goalsFor": 27,
+  "goalsAgainst": 12,
+  "url": "https://www.futbolaragon.com/pnfg/NPcd/NFG_VisCompeticiones_Grupo?cod_primaria=1000123&codequipo=265&codgrupo=23108496",
+  "recentForm": ["G", "E", "E", "G", "G"],
+  "visibleContext": "COPA - 2� ALEV�N · Temporada 2025-2026 · Grupo 4 - Zaragoza",
+  "query": {
+    "codPrimaria": 1000120,
+    "codCompeticion": 23108488,
+    "codGrupo": 23108496,
+    "codTemporada": 21,
+    "codJornada": 8,
+    "codigoEquipo": 265
+  }
+}

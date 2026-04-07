@@ -1,5 +1,4 @@
-// Manages authenticated source sessions without leaking auth details to other layers.
-import { env } from '../../../config/env';
+// Placeholder kept only to preserve the planned architecture; session handling is not implemented in this spike.
 
 export type SourceSession = {
   token: string;
@@ -8,9 +7,6 @@ export type SourceSession = {
 
 export class SessionManager {
   async getAuthenticatedSession(): Promise<SourceSession> {
-    return {
-      token: `${env.futbolAragonUsername || 'anonymous'}-stub-session`,
-      expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-    };
+    throw new Error('Authenticated session management is intentionally disabled for this spike');
   }
 }

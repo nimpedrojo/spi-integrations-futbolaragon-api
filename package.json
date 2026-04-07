@@ -6,7 +6,10 @@
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "capture:public-competition": "node dist/scripts/capture-public-competition.js",
+    "sync:team": "node dist/scripts/sync-team.js",
+    "sync:team:nightly": "node dist/modules/futbolAragon/jobs/sync-team.job.js"
   },
   "repository": {
     "type": "git",
@@ -21,6 +24,7 @@
   },
   "homepage": "https://github.com/nimpedrojo/spi-integrations-futbolaragon-api#readme",
   "dependencies": {
+    "cheerio": "^1.2.0",
     "dotenv": "^17.2.3",
     "fastify": "^5.6.1"
   },

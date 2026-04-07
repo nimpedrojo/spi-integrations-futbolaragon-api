@@ -1,4 +1,7 @@
 node_modules
 dist
+.raw-captures
+.data
+.tmp-raw-captures
 .env.local
 npm-debug.log*

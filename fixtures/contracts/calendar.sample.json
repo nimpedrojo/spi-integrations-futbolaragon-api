@@ -1,0 +1,32 @@
+{
+  "name": "COPA - 2� ALEV�N Grupo 4 - Zaragoza",
+  "seasonLabel": "Temporada 2025-2026",
+  "competitionName": "����-�� COPA - 2� ALEV�N",
+  "groupName": "Grupo 4 - Zaragoza",
+  "competitionUrl": "https://www.futbolaragon.com/pnfg/NPcd/NFG_CmpJornada?cod_primaria=1000120&CodCompeticion=23108488&CodGrupo=23108496&CodTemporada=21&CodJornada=8",
+  "calendarUrl": "https://www.futbolaragon.com/pnfg/NPcd/NFG_VisCalendario_Vis?cod_primaria=1000120&codtemporada=21&codcompeticion=23108488&codgrupo=23108496&CodJornada=8",
+  "standingsUrl": "https://www.futbolaragon.com/pnfg/NPcd/NFG_VisClasificacion?cod_primaria=1000120&codjornada=8&codcompeticion=23108488&codgrupo=23108496&codjornada=8",
+  "query": {
+    "codPrimaria": 1000120,
+    "codCompeticion": 23108488,
+    "codGrupo": 23108496,
+    "codTemporada": 21,
+    "codJornada": 8
+  },
+  "rounds": [
+    {
+      "name": "8 - 11-04-2026",
+      "number": 8,
+      "dateLabel": "11-04-2026",
+      "selected": true,
+      "url": "https://www.futbolaragon.com/pnfg/NPcd/NFG_CmpJornada?cod_primaria=1000120&CodCompeticion=23108488&CodGrupo=23108496&CodTemporada=21&CodJornada=8",
+      "query": {
+        "codPrimaria": 1000120,
+        "codCompeticion": 23108488,
+        "codGrupo": 23108496,
+        "codTemporada": 21,
+        "codJornada": 8
+      }
+    }
+  ]
+}
