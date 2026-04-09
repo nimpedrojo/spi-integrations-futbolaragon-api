@@ -20,6 +20,7 @@ export class TeamSourceMapper {
     sourceTeamId?: string;
     sourceClubName?: string;
     sourceUrl?: string;
+    navigation?: TeamIdentityMapping['navigation'];
   }): TeamIdentityMapping {
     return {
       sourceSystem: 'futbol-aragon',
@@ -30,6 +31,7 @@ export class TeamSourceMapper {
       sourceClubName: input.sourceClubName,
       sourceUrl: input.sourceUrl,
       sourceTeamSlug: input.sourceTeamSlug,
+      navigation: input.navigation,
       active: true,
       createdAt: new Date().toISOString(),
     };
@@ -49,6 +51,7 @@ export class TeamSourceMapper {
       sourceName: mapping.sourceTeamName,
       sourceClubName: mapping.sourceClubName,
       sourceUrl: mapping.sourceUrl,
+      navigation: mapping.navigation,
       metadata: mapping.sourceTeamSlug ? { sourceTeamSlug: mapping.sourceTeamSlug } : undefined,
       createdAt: mapping.createdAt ?? timestamp,
       updatedAt: mapping.updatedAt,

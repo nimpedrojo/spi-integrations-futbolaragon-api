@@ -42,12 +42,16 @@ export class MatchNormalizer {
     });
   }
 
-  private buildRoundId(item: SourceMatch): string {
-    const sourceId = [
+  buildRoundSourceId(item: SourceMatch): string {
+    return [
       item.query.codCompeticion ?? 'unknown-competition',
       item.query.codGrupo ?? 'unknown-group',
       item.query.codJornada ?? 'unknown-round',
     ].join(':');
+  }
+
+  private buildRoundId(item: SourceMatch): string {
+    const sourceId = this.buildRoundSourceId(item);
 
     return `round-${sourceId}`;
   }

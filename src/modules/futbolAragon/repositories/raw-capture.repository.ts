@@ -109,6 +109,19 @@ export class RawCaptureRepository {
     return [...this.pages];
   }
 
+  async findLatestPageByKey(key: string): Promise<RawPageCaptureRecord | null> {
+    const pages = await this.pageStore.readAll();
+    const matchingPages = pages.filter((page) => page.key === key);
+
+    if (matchingPages.length === 0) {
+      return null;
+    }
+
+    matchingPages.sort((left, right) => right.capturedAt.localeCompare(left.capturedAt));
+
+    return matchingPages[0] ?? null;
+  }
+
   private async writeSnapshotToFile(syncRunId: string, capturedAt: string, snapshot: SourceSnapshot): Promise<string> {
     await mkdir(this.snapshotPayloadDirectory, { recursive: true });
 

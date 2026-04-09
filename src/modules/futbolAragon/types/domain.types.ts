@@ -6,6 +6,17 @@ export type TeamSyncRequest = {
   teamId: string;
   sourceTeamSlug: string;
   accessMode: SourceAccessMode;
+  mode?: 'full' | 'incremental';
+};
+
+export type TeamSyncTarget = {
+  internalTeamId: string;
+  enabled: boolean;
+  mode?: 'full' | 'incremental';
+  priority?: number;
+  notes?: string;
+  clubId?: string;
+  sourceTeamSlug?: string;
 };
 
 export type TeamIdentityMapping = {
@@ -17,6 +28,7 @@ export type TeamIdentityMapping = {
   sourceClubName?: string;
   sourceUrl?: string;
   sourceTeamSlug?: string;
+  navigation?: SourceReferenceNavigation;
   active: boolean;
   createdAt?: string;
   updatedAt?: string;
@@ -31,6 +43,7 @@ export type NormalizedEntityType =
   | 'standing';
 
 export type SyncRunStatus = 'running' | 'completed' | 'completed_with_warnings' | 'failed';
+export type SyncBatchRunStatus = 'running' | 'success' | 'partial_success' | 'failed';
 
 export type SyncRunIssue = {
   stage: string;
@@ -119,6 +132,32 @@ export type Standing = BaseNormalizedEntity & {
   sourceUrl?: string;
 };
 
+export type JsonPrimitive = string | number | boolean | null;
+export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
+export type JsonObject = {
+  [key: string]: JsonValue;
+};
+
+export type SourceReferenceNavigationContext = {
+  codPrimaria: number;
+  codCompeticion: number;
+  codGrupo: number;
+  codTemporada?: number;
+  codJornada?: number;
+};
+
+export type SourceReferenceStandingsNavigationContext = {
+  codPrimaria: number;
+  codCompeticion: number;
+  codGrupo: number;
+  codJornada?: number;
+};
+
+export type SourceReferenceNavigation = {
+  competitionPage?: SourceReferenceNavigationContext;
+  standingsPage?: SourceReferenceStandingsNavigationContext;
+};
+
 export type SourceReference = BaseNormalizedEntity & {
   entity: NormalizedEntityType;
   entityType?: NormalizedEntityType;
@@ -130,19 +169,23 @@ export type SourceReference = BaseNormalizedEntity & {
   sourceSystem?: SourceSystem;
   sourceEntityType?: string;
   sourceUrl?: string;
+  navigation?: SourceReferenceNavigation;
   notes?: string;
-  metadata?: Record<string, string | number | boolean | null>;
+  metadata?: JsonObject;
   createdAt?: string;
   updatedAt?: string;
   lastSeenAt?: string;
 };
 
 export type SyncRunSummary = {
+  competitionPageChanged: boolean;
+  standingsPageChanged: boolean;
   competitions: number;
   calendars: number;
   rounds: number;
   matches: number;
   standings: number;
+  skippedStages?: string[];
 };
 
 export type SyncRun = BaseNormalizedEntity & {
@@ -164,4 +207,37 @@ export type SyncTeamResult = {
   status?: SyncRunStatus;
   summary: SyncRunSummary;
   issues?: SyncRunIssue[];
+};
+
+export type SyncTeamsResultItem = {
+  teamId: string;
+  syncRunId?: string;
+  status: 'success' | 'partial_success' | 'failed';
+  errorMessage?: string;
+};
+
+export type SyncTeamsResult = {
+  batchRunId: string;
+  status: 'success' | 'partial_success' | 'failed';
+  totalTeams: number;
+  successCount: number;
+  partialCount: number;
+  failedCount: number;
+  results: SyncTeamsResultItem[];
+};
+
+export type SyncBatchRun = BaseNormalizedEntity & {
+  id: string;
+  startedAt: string;
+  finishedAt?: string;
+  status: SyncBatchRunStatus;
+  totalTeams: number;
+  successCount: number;
+  partialCount: number;
+  failedCount: number;
+  teamIds: string[];
+  summary?: {
+    results: SyncTeamsResultItem[];
+  };
+  errorMessage?: string;
 };

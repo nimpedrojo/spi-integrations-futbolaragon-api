@@ -9,7 +9,8 @@
     "start": "node dist/index.js",
     "capture:public-competition": "node dist/scripts/capture-public-competition.js",
     "sync:team": "node dist/scripts/sync-team.js",
-    "sync:team:nightly": "node dist/modules/futbolAragon/jobs/sync-team.job.js"
+    "sync:team:nightly": "node dist/modules/futbolAragon/jobs/sync-team.job.js",
+    "sync:teams": "node dist/modules/futbolAragon/jobs/sync-teams.job.js"
   },
   "repository": {
     "type": "git",

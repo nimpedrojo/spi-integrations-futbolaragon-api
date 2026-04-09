@@ -20,6 +20,7 @@ const DEFAULT_CLI_OPTIONS: SyncTeamJobCliOptions = {
   teamId: process.env.FAF_SYNC_TEAM_ID ?? 'team-spike',
   sourceTeamSlug: process.env.FAF_SYNC_SOURCE_TEAM_SLUG ?? 'stadium-venecia-a',
   accessMode: 'public',
+  mode: (process.env.FAF_SYNC_MODE as TeamSyncRequest['mode']) ?? 'incremental',
 };
 
 const parseCliOptions = (): SyncTeamJobCliOptions => {
@@ -44,6 +45,11 @@ const parseCliOptions = (): SyncTeamJobCliOptions => {
       case '--source-team-slug':
         options.sourceTeamSlug = value;
         break;
+      case '--mode':
+        if (value === 'full' || value === 'incremental') {
+          options.mode = value;
+        }
+        break;
       default:
         break;
     }
@@ -61,6 +67,7 @@ export const runSyncTeamJobCli = async (): Promise<number> => {
     teamId: options.teamId,
     sourceTeamSlug: options.sourceTeamSlug,
     accessMode: options.accessMode,
+    mode: options.mode,
   });
 
   try {
@@ -86,6 +93,7 @@ export const runSyncTeamJobCli = async (): Promise<number> => {
       clubId: options.clubId,
       teamId: options.teamId,
       sourceTeamSlug: options.sourceTeamSlug,
+      mode: options.mode,
       errorMessage,
     });
 

@@ -1,15 +1,16 @@
 // Orchestrates the first end-to-end public sync flow for the Futbol Aragon spike with stage-level degradation.
+import { createHash } from 'node:crypto';
+
 import { logger, Logger } from '../../../shared/logger/logger';
 import {
   CompetitionPageParams,
-  documentedCompetitionPageParams,
-  documentedCompetitionPagePath,
+  StandingsPageParams,
   PublicFutbolAragonClient,
 } from '../client/public-client';
-import { CalendarsExtractor } from '../extractors/calendars.extractor';
-import { CompetitionsExtractor } from '../extractors/competitions.extractor';
-import { MatchesExtractor } from '../extractors/matches.extractor';
-import { RoundsExtractor } from '../extractors/rounds.extractor';
+import { CalendarsExtractor, ExtractCalendarsResult } from '../extractors/calendars.extractor';
+import { CompetitionsExtractor, ExtractCompetitionsResult } from '../extractors/competitions.extractor';
+import { ExtractMatchesResult, MatchesExtractor } from '../extractors/matches.extractor';
+import { ExtractRoundsResult, RoundsExtractor } from '../extractors/rounds.extractor';
 import { StandingsExtractor } from '../extractors/standings.extractor';
 import { TeamSourceMapper } from '../mappers/team-source.mapper';
 import { CalendarNormalizer } from '../normalizers/calendar.normalizer';
@@ -57,8 +58,10 @@ export class SyncTeamService {
       throw new Error('Authenticated sync is disabled for this spike. Use the public Futbol Aragon flow.');
     }
 
+    const mode = request.mode ?? 'incremental';
     const syncRun = await this.syncRunRepository.start(request.teamId);
     const issues: SyncRunIssue[] = [];
+    const skippedStages: string[] = [];
 
     try {
       const teamReference = await this.resolveTeamReference(request);
@@ -69,78 +72,199 @@ export class SyncTeamService {
         internalTeamId: request.teamId,
         sourceTeamSlug: request.sourceTeamSlug,
         sourceReferenceId: teamReference.id,
+        mode,
         entryParams,
       });
 
+      if (mode === 'incremental') {
+        this.serviceLogger.info('Incremental sync mode enabled', {
+          syncRunId: syncRun.id,
+          internalTeamId: request.teamId,
+        });
+      }
+
       const competitionPage = await this.publicClient.getCompetitionPage(entryParams);
+      const competitionPageChange = await this.detectPageChange({
+        key: `${request.teamId}-competition-page`,
+        pageBody: competitionPage.body,
+        mode,
+      });
+
       await this.capturePage({
         issues,
         stage: 'raw-competition-page',
         key: `${request.teamId}-competition-page`,
         entityType: 'competition-page',
-        sourceUrl: documentedCompetitionPagePath(this.publicClient),
+        sourceUrl: this.publicClient.buildUrl('/pnfg/NPcd/NFG_CmpJornada', {
+          cod_primaria: entryParams.codPrimaria,
+          CodCompeticion: entryParams.codCompeticion,
+          CodGrupo: entryParams.codGrupo,
+          CodTemporada: entryParams.codTemporada,
+          CodJornada: entryParams.codJornada,
+          ...(entryParams.schCodigoDelegacion !== undefined
+            ? { Sch_Codigo_Delegacion: entryParams.schCodigoDelegacion }
+            : {}),
+        }),
         accessMode: request.accessMode,
         page: competitionPage,
       });
 
-      const extractedCompetitions = this.competitionsExtractor.extract(competitionPage.body);
-      const extractedCalendars = this.calendarsExtractor.extract(competitionPage.body);
-      const extractedRounds = this.roundsExtractor.extract(competitionPage.body);
-      const extractedMatches = this.matchesExtractor.extract(competitionPage.body);
+      let extractedCompetitions: ExtractCompetitionsResult = { competitions: [] };
+      let extractedCalendars: ExtractCalendarsResult = { calendars: [] };
+      let extractedRounds: ExtractRoundsResult = { rounds: [] };
+      let extractedMatches: ExtractMatchesResult = { matches: [] };
 
-      this.ensureCoreExtractionIsUsable({
-        competitions: extractedCompetitions.competitions.length,
-        calendars: extractedCalendars.calendars.length,
-        rounds: extractedRounds.rounds.length,
-        matches: extractedMatches.matches.length,
-      });
+      if (competitionPageChange.changed) {
+        this.serviceLogger.info('Competition page changed, processing extraction', {
+          syncRunId: syncRun.id,
+          mode,
+          previousHash: competitionPageChange.previousHash,
+          currentHash: competitionPageChange.currentHash,
+        });
 
-      const standingsParams = this.resolveStandingsParams(extractedCalendars.calendars[0]?.query, entryParams);
-      const standingsStage = await this.runWarningStage(
-        issues,
-        'standings-page',
-        async () => {
-          const standingsPage = await this.publicClient.getStandingsPage(standingsParams);
-          await this.capturePage({
-            issues,
-            stage: 'raw-standings-page',
-            key: `${request.teamId}-standings-page`,
-            entityType: 'standings-page',
-            sourceUrl: this.publicClient.buildUrl('/pnfg/NPcd/NFG_VisClasificacion', {
-              cod_primaria: standingsParams.codPrimaria,
-              codcompeticion: standingsParams.codCompeticion,
-              codgrupo: standingsParams.codGrupo,
-              codjornada: standingsParams.codJornada,
-            }),
-            accessMode: request.accessMode,
-            page: standingsPage,
-          });
+        extractedCompetitions = this.competitionsExtractor.extract(competitionPage.body);
+        extractedCalendars = this.calendarsExtractor.extract(competitionPage.body);
+        extractedRounds = this.roundsExtractor.extract(competitionPage.body);
+        extractedMatches = this.matchesExtractor.extract(competitionPage.body);
 
-          return this.standingsExtractor.extract(standingsPage.body);
-        },
+        this.ensureCoreExtractionIsUsable({
+          competitions: extractedCompetitions.competitions.length,
+          calendars: extractedCalendars.calendars.length,
+          rounds: extractedRounds.rounds.length,
+          matches: extractedMatches.matches.length,
+        });
+      } else {
+        skippedStages.push('competition-page-unchanged');
+        this.serviceLogger.info('Competition page unchanged, skipping extraction', {
+          syncRunId: syncRun.id,
+          mode,
+          previousHash: competitionPageChange.previousHash,
+          currentHash: competitionPageChange.currentHash,
+        });
+      }
+
+      const standingsParams = this.resolveStandingsParams(
+        teamReference,
+        extractedCalendars.calendars[0]?.query,
+        entryParams,
       );
 
-      const seasonLabel = extractedCalendars.calendars[0]?.seasonLabel;
-      const competitions = this.competitionNormalizer.normalize(extractedCompetitions.competitions, {
-        teamId: request.teamId,
-        season: seasonLabel,
-      });
-      const calendars = this.calendarNormalizer.normalize(extractedCalendars.calendars, {
-        teamId: request.teamId,
-      });
-      const rounds = this.roundNormalizer.normalize(extractedRounds.rounds, {
-        calendarId: calendars[0]?.id,
-      });
-      const matches = this.matchNormalizer.normalize(extractedMatches.matches);
-      const standings = standingsStage?.standings
-        ? this.standingNormalizer.normalize(standingsStage.standings)
-        : [];
+      let standingsPageChanged = false;
+      let standings: ReturnType<StandingNormalizer['normalize']> = [];
 
-      await this.persistStage(issues, 'persist-competitions', () => this.competitionRepository.saveMany(competitions));
-      await this.persistStage(issues, 'persist-calendars', () => this.calendarRepository.saveMany(calendars));
-      await this.persistStage(issues, 'persist-rounds', () => this.roundRepository.saveMany(rounds));
-      await this.persistStage(issues, 'persist-matches', () => this.matchRepository.saveMany(matches));
-      await this.persistStage(issues, 'persist-standings', () => this.standingRepository.saveMany(standings));
+      const standingsStage = await this.runWarningStage(issues, 'standings-page', async () => {
+        const standingsPage = await this.publicClient.getStandingsPage(standingsParams);
+        const standingsPageChange = await this.detectPageChange({
+          key: `${request.teamId}-standings-page`,
+          pageBody: standingsPage.body,
+          mode,
+        });
+
+        standingsPageChanged = standingsPageChange.changed;
+
+        await this.capturePage({
+          issues,
+          stage: 'raw-standings-page',
+          key: `${request.teamId}-standings-page`,
+          entityType: 'standings-page',
+          sourceUrl: this.publicClient.buildUrl('/pnfg/NPcd/NFG_VisClasificacion', {
+            cod_primaria: standingsParams.codPrimaria,
+            codcompeticion: standingsParams.codCompeticion,
+            codgrupo: standingsParams.codGrupo,
+            codjornada: standingsParams.codJornada,
+          }),
+          accessMode: request.accessMode,
+          page: standingsPage,
+        });
+
+        if (!standingsPageChange.changed) {
+          skippedStages.push('standings-page-unchanged');
+          this.serviceLogger.info('Standings page unchanged, skipping extraction', {
+            syncRunId: syncRun.id,
+            mode,
+            previousHash: standingsPageChange.previousHash,
+            currentHash: standingsPageChange.currentHash,
+          });
+
+          return null;
+        }
+
+        this.serviceLogger.info('Standings page changed, processing extraction', {
+          syncRunId: syncRun.id,
+          mode,
+          previousHash: standingsPageChange.previousHash,
+          currentHash: standingsPageChange.currentHash,
+        });
+
+        return this.standingsExtractor.extract(standingsPage.body);
+      });
+
+      const seasonLabel = extractedCalendars.calendars[0]?.seasonLabel;
+      let competitions: ReturnType<CompetitionNormalizer['normalize']> = [];
+      let calendars: ReturnType<CalendarNormalizer['normalize']> = [];
+      let rounds: ReturnType<RoundNormalizer['normalize']> = [];
+      let matches: ReturnType<MatchNormalizer['normalize']> = [];
+
+      if (competitionPageChange.changed) {
+        competitions = this.competitionNormalizer.normalize(extractedCompetitions.competitions, {
+          teamId: request.teamId,
+          season: seasonLabel,
+        });
+        calendars = this.calendarNormalizer.normalize(extractedCalendars.calendars, {
+          teamId: request.teamId,
+        });
+
+        if (calendars.length > 1) {
+          issues.push(
+            this.createIssue(
+              'calendar-selection',
+              'warning',
+              `Multiple calendars were extracted (${calendars.length}). The sync is using calendars[0] as the reference calendar for related entities.`,
+            ),
+          );
+        }
+
+        rounds = this.roundNormalizer.normalize(extractedRounds.rounds, {
+          calendarId: calendars[0]?.id,
+        });
+        const roundIdBySourceId = new Map(rounds.map((round) => [round.sourceId, round.id]));
+        const warnedOrphanRoundSourceIds = new Set<string>();
+
+        matches = this.matchNormalizer.normalize(extractedMatches.matches, {
+          roundIdResolver: (item) => {
+            const roundSourceId = this.matchNormalizer.buildRoundSourceId(item);
+            const roundId = roundIdBySourceId.get(roundSourceId);
+
+            if (roundId) {
+              return roundId;
+            }
+
+            if (!warnedOrphanRoundSourceIds.has(roundSourceId)) {
+              warnedOrphanRoundSourceIds.add(roundSourceId);
+              issues.push(
+                this.createIssue(
+                  'match-round-link',
+                  'warning',
+                  `No persisted round was found for roundSourceId=${roundSourceId}. The sync will keep a fallback roundId for affected matches.`,
+                ),
+              );
+            }
+
+            return `round-${roundSourceId}`;
+          },
+        });
+
+        await this.persistStage(issues, 'persist-competitions', () => this.competitionRepository.saveMany(competitions));
+        await this.persistStage(issues, 'persist-calendars', () => this.calendarRepository.saveMany(calendars));
+        await this.persistStage(issues, 'persist-rounds', () => this.roundRepository.saveMany(rounds));
+        await this.persistStage(issues, 'persist-matches', () => this.matchRepository.saveMany(matches));
+      }
+
+      if (standingsStage?.standings) {
+        standings = this.standingNormalizer.normalize(standingsStage.standings);
+        await this.persistStage(issues, 'persist-standings', () => this.standingRepository.saveMany(standings));
+      }
+
       await this.persistStage(issues, 'persist-team-source-reference', () =>
         this.sourceReferenceRepository.save({
           ...teamReference,
@@ -153,11 +277,14 @@ export class SyncTeamService {
       );
 
       const summary = {
+        competitionPageChanged: competitionPageChange.changed,
+        standingsPageChanged,
         competitions: competitions.length,
         calendars: calendars.length,
         rounds: rounds.length,
         matches: matches.length,
         standings: standings.length,
+        skippedStages: skippedStages.length > 0 ? skippedStages : undefined,
       };
 
       const completedRun = await this.syncRunRepository.complete(syncRun.id, summary, issues);
@@ -204,12 +331,67 @@ export class SyncTeamService {
     return futbolAragonReference;
   }
 
-  private resolveEntryCompetitionParams(_teamReference: SourceReference): CompetitionPageParams {
-    // TODO: replace this documented spike entry point with persisted navigation params once team mapping is enriched.
-    return documentedCompetitionPageParams;
+  private async detectPageChange(input: {
+    key: string;
+    pageBody: string;
+    mode: 'full' | 'incremental';
+  }): Promise<{
+    changed: boolean;
+    previousHash?: string;
+    currentHash: string;
+  }> {
+    const currentHash = this.computeContentHash(input.pageBody);
+
+    if (input.mode === 'full') {
+      return {
+        changed: true,
+        currentHash,
+      };
+    }
+
+    const previousCapture = await this.rawCaptureRepository.findLatestPageByKey(input.key);
+    const previousHash = previousCapture?.contentHash;
+
+    if (!previousHash) {
+      return {
+        changed: true,
+        currentHash,
+      };
+    }
+
+    return {
+      changed: previousHash !== currentHash,
+      previousHash,
+      currentHash,
+    };
+  }
+
+  private resolveEntryCompetitionParams(teamReference: SourceReference): CompetitionPageParams {
+    const navigation = teamReference.navigation?.competitionPage;
+
+    if (!navigation) {
+      throw new Error(
+        `Team source reference ${teamReference.id ?? teamReference.internalId} is missing navigation.competitionPage metadata required to start sync.`,
+      );
+    }
+
+    if (navigation.codTemporada === undefined || navigation.codJornada === undefined) {
+      throw new Error(
+        `Team source reference ${teamReference.id ?? teamReference.internalId} has incomplete navigation.competitionPage metadata. codTemporada and codJornada are required to start sync.`,
+      );
+    }
+
+    return {
+      codPrimaria: navigation.codPrimaria,
+      codCompeticion: navigation.codCompeticion,
+      codGrupo: navigation.codGrupo,
+      codTemporada: navigation.codTemporada,
+      codJornada: navigation.codJornada,
+    };
   }
 
   private resolveStandingsParams(
+    teamReference: SourceReference,
     calendarQuery: {
       codPrimaria?: number;
       codCompeticion?: number;
@@ -218,12 +400,14 @@ export class SyncTeamService {
       codJornada?: number;
     } | undefined,
     fallback: CompetitionPageParams,
-  ) {
+  ): StandingsPageParams {
+    const navigation = teamReference.navigation?.standingsPage;
+
     return {
-      codPrimaria: calendarQuery?.codPrimaria ?? fallback.codPrimaria,
-      codCompeticion: calendarQuery?.codCompeticion ?? fallback.codCompeticion,
-      codGrupo: calendarQuery?.codGrupo ?? fallback.codGrupo,
-      codJornada: calendarQuery?.codJornada ?? fallback.codJornada,
+      codPrimaria: calendarQuery?.codPrimaria ?? navigation?.codPrimaria ?? fallback.codPrimaria,
+      codCompeticion: calendarQuery?.codCompeticion ?? navigation?.codCompeticion ?? fallback.codCompeticion,
+      codGrupo: calendarQuery?.codGrupo ?? navigation?.codGrupo ?? fallback.codGrupo,
+      codJornada: calendarQuery?.codJornada ?? navigation?.codJornada ?? fallback.codJornada,
     };
   }
 
@@ -291,15 +475,27 @@ export class SyncTeamService {
     };
   }
 
+  private computeContentHash(payload: string): string {
+    return createHash('sha256').update(payload, 'utf8').digest('hex');
+  }
+
   private ensureCoreExtractionIsUsable(summary: {
     competitions: number;
     calendars: number;
     rounds: number;
     matches: number;
   }): void {
-    if (summary.competitions === 0 && summary.calendars === 0 && summary.rounds === 0 && summary.matches === 0) {
+    if (summary.calendars === 0) {
+      throw new Error('Core extraction did not produce any calendars. The competition page is incomplete or no longer matches the expected HTML.');
+    }
+
+    if (summary.rounds === 0) {
+      throw new Error('Core extraction did not produce any rounds. The competition page is incomplete or the round selector is no longer being extracted correctly.');
+    }
+
+    if (summary.competitions === 0 && summary.matches === 0) {
       throw new Error(
-        'Core extraction returned no usable data from the competition page. The source HTML is likely invalid or incomplete.',
+        'Core extraction did not produce competitions or matches. The competition page is likely invalid, incomplete, or structurally changed.',
       );
     }
   }

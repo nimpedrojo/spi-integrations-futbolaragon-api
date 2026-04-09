@@ -10,7 +10,23 @@ export class MatchRepository {
   );
 
   async saveMany(items: Match[]): Promise<number> {
-    await this.store.upsertMany(items, (item) => item.id);
+    const existing = await this.store.readAll();
+    const existingBySourceId = new Map(existing.map((item) => [item.sourceId, item]));
+    const nextBySourceId = new Map(existing.map((item) => [item.sourceId, item]));
+
+    for (const incoming of items) {
+      const persisted = existingBySourceId.get(incoming.sourceId);
+
+      nextBySourceId.set(incoming.sourceId, {
+        ...persisted,
+        ...incoming,
+        // Preserve the persisted identifier so downstream relations remain stable across reprocessing.
+        id: persisted?.id ?? incoming.id,
+        sourceId: incoming.sourceId,
+      });
+    }
+
+    await this.store.writeAll(Array.from(nextBySourceId.values()));
 
     return items.length;
   }

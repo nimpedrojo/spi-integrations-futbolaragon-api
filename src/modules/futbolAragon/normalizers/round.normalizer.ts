@@ -16,7 +16,8 @@ export class RoundNormalizer {
         return {
           id: `round-${sourceId}`,
           sourceId,
-          calendarId: options?.calendarId ?? this.buildCalendarId(item),
+          // Prefer the already-normalized calendar when the sync flow resolved it.
+          calendarId: this.resolveCalendarId(item, options),
           name: item.name,
           order: item.number,
           number: item.number,
@@ -37,6 +38,17 @@ export class RoundNormalizer {
     });
   }
 
+  private resolveCalendarId(item: SourceRound, options?: RoundNormalizerOptions): string {
+    if (options?.calendarId) {
+      return options.calendarId;
+    }
+
+    // Transitional spike fallback: if the sync flow has not resolved a real persisted calendar,
+    // derive a calendarId from source context to preserve compatibility. This derived id may not
+    // correspond to an actually persisted calendar entity.
+    return this.buildCalendarId(item);
+  }
+
   private buildCalendarId(item: SourceRound): string {
     const sourceId = [
       item.query.codCompeticion ?? 'unknown-competition',
@@ -51,7 +63,7 @@ export class RoundNormalizer {
     return [
       item.query.codCompeticion ?? 'unknown-competition',
       item.query.codGrupo ?? 'unknown-group',
-      item.query.codJornada,
+      item.query.codJornada ?? 'unknown-round',
     ].join(':');
   }
 }

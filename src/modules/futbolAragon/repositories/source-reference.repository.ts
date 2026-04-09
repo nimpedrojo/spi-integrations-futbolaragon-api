@@ -2,7 +2,7 @@
 import path from 'node:path';
 
 import { JsonFileStore } from '../../../shared/utils/json-file-store';
-import { SourceReference } from '../types/domain.types';
+import { SourceReference, SourceReferenceNavigation } from '../types/domain.types';
 
 export type SourceReferenceLookup = {
   sourceSystem?: SourceReference['sourceSystem'];
@@ -33,6 +33,27 @@ export class SourceReferenceRepository {
     await this.store.upsertOne(persistedReference, (item) => this.buildStorageKey(item));
 
     return persistedReference;
+  }
+
+  async saveNavigation(
+    internalId: string,
+    navigation: SourceReferenceNavigation,
+    entityType: SourceReference['entity'] = 'team',
+  ): Promise<SourceReference | null> {
+    const references = await this.findByInternalId(internalId, entityType);
+    const reference = references[0];
+
+    if (!reference) {
+      return null;
+    }
+
+    return this.save({
+      ...reference,
+      navigation: {
+        ...reference.navigation,
+        ...navigation,
+      },
+    });
   }
 
   async findByInternalId(internalId: string, entityType: SourceReference['entity'] = 'team'): Promise<SourceReference[]> {
@@ -75,6 +96,15 @@ export class SourceReferenceRepository {
         return lookup.sourceId !== undefined || lookup.sourceUrl !== undefined || lookup.sourceName !== undefined;
       }) ?? null
     );
+  }
+
+  async getNavigationByInternalId(
+    internalId: string,
+    entityType: SourceReference['entity'] = 'team',
+  ): Promise<SourceReferenceNavigation | undefined> {
+    const references = await this.findByInternalId(internalId, entityType);
+
+    return references[0]?.navigation;
   }
 
   private buildStorageKey(reference: SourceReference): string {
