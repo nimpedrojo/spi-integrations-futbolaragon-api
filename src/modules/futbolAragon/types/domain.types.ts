@@ -94,7 +94,7 @@ export type Round = BaseNormalizedEntity & {
   sourceId: string;
   calendarId: string;
   name: string;
-  order: number;
+  roundOrder: number;
   number?: number;
   dateLabel?: string;
   status?: 'scheduled' | 'in_progress' | 'completed';
@@ -119,6 +119,7 @@ export type Standing = BaseNormalizedEntity & {
   id: string;
   sourceId: string;
   competitionId: string;
+  capturedAt?: string;
   teamName: string;
   position: number;
   points: number;

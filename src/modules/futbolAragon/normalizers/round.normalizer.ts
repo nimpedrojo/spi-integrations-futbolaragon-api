@@ -19,7 +19,7 @@ export class RoundNormalizer {
           // Prefer the already-normalized calendar when the sync flow resolved it.
           calendarId: this.resolveCalendarId(item, options),
           name: item.name,
-          order: item.number,
+          roundOrder: item.number,
           number: item.number,
           dateLabel: item.dateLabel,
           status: item.state === 'completed' || item.state === 'in_progress' || item.state === 'scheduled'
@@ -33,7 +33,7 @@ export class RoundNormalizer {
         sourceId: item.sourceId,
         calendarId: item.calendarSourceId,
         name: item.name,
-        order: item.order,
+        roundOrder: item.order,
       };
     });
   }

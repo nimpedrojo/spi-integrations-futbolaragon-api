@@ -1,31 +1,31 @@
-// Tracks multi-team batch execution lifecycle in a filesystem-backed JSON store.
-import path from 'node:path';
+// Tracks multi-team batch execution lifecycle using Prisma persistence.
+import { Prisma, SyncBatchRun as PrismaSyncBatchRun } from '@prisma/client';
 
-import { JsonFileStore } from '../../../shared/utils/json-file-store';
+import { prisma } from '../../../shared/prisma/prisma';
 import { SyncBatchRun, SyncBatchRunStatus, SyncTeamsResultItem } from '../types/domain.types';
 
 export class SyncBatchRunRepository {
   private readonly runs = new Map<string, SyncBatchRun>();
-  private readonly store = new JsonFileStore<SyncBatchRun>(
-    path.resolve(process.cwd(), '.data', 'futbol-aragon', 'normalized', 'sync-batch-runs.json'),
-  );
 
   async start(teamIds: string[]): Promise<SyncBatchRun> {
-    const syncBatchRun: SyncBatchRun = {
-      id: `sync-batch-${Date.now()}`,
-      startedAt: new Date().toISOString(),
-      status: 'running',
-      totalTeams: teamIds.length,
-      successCount: 0,
-      partialCount: 0,
-      failedCount: 0,
-      teamIds,
-    };
+    const now = new Date();
+    const syncBatchRun = await prisma.syncBatchRun.create({
+      data: {
+        id: `sync-batch-${Date.now()}`,
+        startedAt: now,
+        status: 'running',
+        totalTeams: teamIds.length,
+        successCount: 0,
+        partialCount: 0,
+        failedCount: 0,
+        teamIds: teamIds as Prisma.InputJsonValue,
+      },
+    });
 
-    this.runs.set(syncBatchRun.id, syncBatchRun);
-    await this.store.upsertOne(syncBatchRun, (item) => item.id);
+    const domainRun = this.toDomain(syncBatchRun);
+    this.runs.set(domainRun.id, domainRun);
 
-    return syncBatchRun;
+    return domainRun;
   }
 
   async complete(
@@ -39,48 +39,98 @@ export class SyncBatchRunRepository {
       results: SyncTeamsResultItem[];
     },
   ): Promise<SyncBatchRun> {
-    const existingRun = this.runs.get(batchRunId);
+    await this.ensureSyncBatchRunExists(batchRunId);
 
-    if (!existingRun) {
-      throw new Error(`Sync batch run not found: ${batchRunId}`);
-    }
-
-    const completedRun: SyncBatchRun = {
-      ...existingRun,
-      status: input.status,
-      finishedAt: new Date().toISOString(),
-      totalTeams: input.totalTeams,
-      successCount: input.successCount,
-      partialCount: input.partialCount,
-      failedCount: input.failedCount,
-      summary: {
-        results: input.results,
+    const updatedRun = await prisma.syncBatchRun.update({
+      where: { id: batchRunId },
+      data: {
+        status: input.status,
+        finishedAt: new Date(),
+        totalTeams: input.totalTeams,
+        successCount: input.successCount,
+        partialCount: input.partialCount,
+        failedCount: input.failedCount,
+        summary: {
+          results: input.results,
+        } as Prisma.InputJsonValue,
       },
-    };
+    });
 
-    this.runs.set(batchRunId, completedRun);
-    await this.store.upsertOne(completedRun, (item) => item.id);
+    const domainRun = this.toDomain(updatedRun);
+    this.runs.set(domainRun.id, domainRun);
 
-    return completedRun;
+    return domainRun;
   }
 
   async fail(batchRunId: string, errorMessage: string): Promise<SyncBatchRun> {
-    const existingRun = this.runs.get(batchRunId);
+    await this.ensureSyncBatchRunExists(batchRunId);
+
+    const updatedRun = await prisma.syncBatchRun.update({
+      where: { id: batchRunId },
+      data: {
+        status: 'failed',
+        finishedAt: new Date(),
+        errorMessage,
+      },
+    });
+
+    const domainRun = this.toDomain(updatedRun);
+    this.runs.set(domainRun.id, domainRun);
+
+    return domainRun;
+  }
+
+  private async ensureSyncBatchRunExists(batchRunId: string): Promise<void> {
+    if (this.runs.has(batchRunId)) {
+      return;
+    }
+
+    const existingRun = await prisma.syncBatchRun.findUnique({
+      where: { id: batchRunId },
+    });
 
     if (!existingRun) {
       throw new Error(`Sync batch run not found: ${batchRunId}`);
     }
 
-    const failedRun: SyncBatchRun = {
-      ...existingRun,
-      status: 'failed',
-      finishedAt: new Date().toISOString(),
-      errorMessage,
+    this.runs.set(batchRunId, this.toDomain(existingRun));
+  }
+
+  private toDomain(syncBatchRun: PrismaSyncBatchRun): SyncBatchRun {
+    return {
+      id: syncBatchRun.id,
+      startedAt: syncBatchRun.startedAt.toISOString(),
+      finishedAt: syncBatchRun.finishedAt?.toISOString(),
+      status: syncBatchRun.status as SyncBatchRun['status'],
+      totalTeams: syncBatchRun.totalTeams,
+      successCount: syncBatchRun.successCount,
+      partialCount: syncBatchRun.partialCount,
+      failedCount: syncBatchRun.failedCount,
+      teamIds: this.fromJsonArray(syncBatchRun.teamIds) as string[],
+      summary: this.fromSummary(syncBatchRun.summary),
+      errorMessage: syncBatchRun.errorMessage ?? undefined,
+      createdAt: syncBatchRun.createdAt.toISOString(),
+      updatedAt: syncBatchRun.updatedAt.toISOString(),
     };
+  }
 
-    this.runs.set(batchRunId, failedRun);
-    await this.store.upsertOne(failedRun, (item) => item.id);
+  private fromJsonArray(value: Prisma.JsonValue | null): unknown[] {
+    return Array.isArray(value) ? value : [];
+  }
 
-    return failedRun;
+  private fromSummary(value: Prisma.JsonValue | null): SyncBatchRun['summary'] | undefined {
+    if (!value || Array.isArray(value) || typeof value !== 'object') {
+      return undefined;
+    }
+
+    const results = (value as { results?: unknown }).results;
+
+    if (!Array.isArray(results)) {
+      return undefined;
+    }
+
+    return {
+      results: results as SyncTeamsResultItem[],
+    };
   }
 }

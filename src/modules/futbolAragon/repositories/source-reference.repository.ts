@@ -1,8 +1,8 @@
-// Stores reusable source-to-internal correspondences in filesystem-backed JSON for the spike.
-import path from 'node:path';
+// Stores reusable source-to-internal correspondences in MariaDB through Prisma.
+import { Prisma, SourceReference as PrismaSourceReference } from '@prisma/client';
 
-import { JsonFileStore } from '../../../shared/utils/json-file-store';
-import { SourceReference, SourceReferenceNavigation } from '../types/domain.types';
+import { prisma } from '../../../shared/prisma/prisma';
+import { JsonObject, SourceReference, SourceReferenceNavigation } from '../types/domain.types';
 
 export type SourceReferenceLookup = {
   sourceSystem?: SourceReference['sourceSystem'];
@@ -13,14 +13,10 @@ export type SourceReferenceLookup = {
 };
 
 export class SourceReferenceRepository {
-  private readonly store = new JsonFileStore<SourceReference>(
-    path.resolve(process.cwd(), '.data', 'futbol-aragon', 'normalized', 'source-references.json'),
-  );
-
   async save(reference: SourceReference): Promise<SourceReference> {
     const now = new Date().toISOString();
     const entityType = reference.entityType ?? reference.entity;
-    const persistedReference: SourceReference = {
+    const normalizedReference: SourceReference = {
       ...reference,
       id: reference.id ?? `src-ref-${entityType}-${reference.internalId}-${Date.now()}`,
       entity: entityType,
@@ -30,9 +26,22 @@ export class SourceReferenceRepository {
       lastSeenAt: reference.lastSeenAt ?? now,
     };
 
-    await this.store.upsertOne(persistedReference, (item) => this.buildStorageKey(item));
+    const existingReference = await this.findExistingReference(normalizedReference);
 
-    return persistedReference;
+    if (existingReference) {
+      const updated = await prisma.sourceReference.update({
+        where: { id: existingReference.id },
+        data: this.toPrismaUpdateData(normalizedReference),
+      });
+
+      return this.toDomain(updated);
+    }
+
+    const created = await prisma.sourceReference.create({
+      data: this.toPrismaCreateData(normalizedReference),
+    });
+
+    return this.toDomain(created);
   }
 
   async saveNavigation(
@@ -57,45 +66,38 @@ export class SourceReferenceRepository {
   }
 
   async findByInternalId(internalId: string, entityType: SourceReference['entity'] = 'team'): Promise<SourceReference[]> {
-    const references = await this.store.readAll();
-
-    return references.filter((reference) => {
-      const normalizedEntityType = reference.entityType ?? reference.entity;
-
-      return reference.internalId === internalId && normalizedEntityType === entityType;
+    const references = await prisma.sourceReference.findMany({
+      where: {
+        internalId,
+        ...this.buildContextWhere({ entityType }),
+      },
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
     });
+
+    return references.map((reference) => this.toDomain(reference));
   }
 
   async findBySourceReference(lookup: SourceReferenceLookup): Promise<SourceReference | null> {
-    const references = await this.store.readAll();
+    if (lookup.sourceId === undefined && lookup.sourceUrl === undefined && lookup.sourceName === undefined) {
+      return null;
+    }
 
-    return (
-      references.find((reference) => {
-        const normalizedEntityType = reference.entityType ?? reference.entity;
+    const identityWhere =
+      lookup.sourceId !== undefined
+        ? { sourceId: lookup.sourceId }
+        : lookup.sourceUrl !== undefined
+          ? { sourceUrl: lookup.sourceUrl }
+          : { sourceName: lookup.sourceName };
 
-        if (lookup.sourceSystem && reference.sourceSystem !== lookup.sourceSystem) {
-          return false;
-        }
+    const reference = await prisma.sourceReference.findFirst({
+      where: {
+        ...this.buildContextWhere(lookup),
+        ...identityWhere,
+      },
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+    });
 
-        if (lookup.entityType && normalizedEntityType !== lookup.entityType) {
-          return false;
-        }
-
-        if (lookup.sourceId && reference.sourceId !== lookup.sourceId) {
-          return false;
-        }
-
-        if (lookup.sourceUrl && reference.sourceUrl !== lookup.sourceUrl) {
-          return false;
-        }
-
-        if (lookup.sourceName && reference.sourceName !== lookup.sourceName) {
-          return false;
-        }
-
-        return lookup.sourceId !== undefined || lookup.sourceUrl !== undefined || lookup.sourceName !== undefined;
-      }) ?? null
-    );
+    return reference ? this.toDomain(reference) : null;
   }
 
   async getNavigationByInternalId(
@@ -107,10 +109,142 @@ export class SourceReferenceRepository {
     return references[0]?.navigation;
   }
 
-  private buildStorageKey(reference: SourceReference): string {
+  private async findExistingReference(reference: SourceReference): Promise<PrismaSourceReference | null> {
+    const sourceSystem = reference.sourceSystem ?? null;
     const entityType = reference.entityType ?? reference.entity;
-    const sourceIdentity = reference.sourceId ?? reference.sourceUrl ?? reference.sourceName ?? 'unknown-source';
 
-    return `${reference.sourceSystem ?? 'unknown-system'}:${entityType}:${reference.internalId}:${sourceIdentity}`;
+    if (reference.id) {
+      const byId = await prisma.sourceReference.findUnique({
+        where: { id: reference.id },
+      });
+
+      if (byId) {
+        return byId;
+      }
+    }
+
+    const candidates = await prisma.sourceReference.findMany({
+      where: {
+        internalId: reference.internalId,
+        ...this.buildContextWhere({
+          sourceSystem: sourceSystem ?? undefined,
+          entityType,
+        }),
+      },
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+    });
+
+    return (
+      candidates.find((candidate) => reference.sourceId !== undefined && candidate.sourceId === reference.sourceId) ??
+      candidates.find((candidate) => reference.sourceUrl !== undefined && candidate.sourceUrl === reference.sourceUrl) ??
+      candidates.find((candidate) => reference.sourceName !== undefined && candidate.sourceName === reference.sourceName) ??
+      candidates[0] ??
+      null
+    );
+  }
+
+  private toPrismaCreateData(reference: SourceReference): Prisma.SourceReferenceCreateInput {
+    return {
+      id: reference.id ?? `src-ref-${reference.entity}-${reference.internalId}-${Date.now()}`,
+      entity: reference.entity,
+      entityType: reference.entityType,
+      internalId: reference.internalId,
+      internalName: reference.internalName,
+      sourceId: reference.sourceId,
+      sourceName: reference.sourceName,
+      sourceClubName: reference.sourceClubName,
+      sourceSystem: reference.sourceSystem,
+      sourceEntityType: reference.sourceEntityType,
+      sourceUrl: reference.sourceUrl,
+      navigation: this.toNullableJsonValue(reference.navigation),
+      notes: reference.notes,
+      metadata: this.toNullableJsonValue(reference.metadata),
+      updatedAt: this.toDate(reference.updatedAt),
+      lastSeenAt: this.toNullableDate(reference.lastSeenAt),
+    };
+  }
+
+  private buildContextWhere(input: {
+    sourceSystem?: SourceReference['sourceSystem'];
+    entityType?: SourceReference['entityType'] | SourceReference['entity'];
+  }): Prisma.SourceReferenceWhereInput {
+    return {
+      ...(input.sourceSystem ? { sourceSystem: input.sourceSystem } : {}),
+      ...(input.entityType ? { OR: [{ entity: input.entityType }, { entityType: input.entityType }] } : {}),
+    };
+  }
+
+  private toPrismaUpdateData(reference: SourceReference): Prisma.SourceReferenceUpdateInput {
+    return {
+      entity: reference.entity,
+      entityType: reference.entityType,
+      internalId: reference.internalId,
+      internalName: reference.internalName,
+      sourceId: reference.sourceId,
+      sourceName: reference.sourceName,
+      sourceClubName: reference.sourceClubName,
+      sourceSystem: reference.sourceSystem,
+      sourceEntityType: reference.sourceEntityType,
+      sourceUrl: reference.sourceUrl,
+      navigation: this.toNullableJsonValue(reference.navigation),
+      notes: reference.notes,
+      metadata: this.toNullableJsonValue(reference.metadata),
+      updatedAt: this.toDate(reference.updatedAt),
+      lastSeenAt: this.toNullableDate(reference.lastSeenAt),
+    };
+  }
+
+  private toDomain(reference: PrismaSourceReference): SourceReference {
+    return {
+      id: reference.id,
+      entity: reference.entity as SourceReference['entity'],
+      entityType: (reference.entityType ?? undefined) as SourceReference['entityType'],
+      internalId: reference.internalId,
+      internalName: reference.internalName ?? undefined,
+      sourceId: reference.sourceId ?? undefined,
+      sourceName: reference.sourceName ?? undefined,
+      sourceClubName: reference.sourceClubName ?? undefined,
+      sourceSystem: (reference.sourceSystem ?? undefined) as SourceReference['sourceSystem'],
+      sourceEntityType: reference.sourceEntityType ?? undefined,
+      sourceUrl: reference.sourceUrl ?? undefined,
+      navigation: this.fromJsonObject(reference.navigation) as SourceReferenceNavigation | undefined,
+      notes: reference.notes ?? undefined,
+      metadata: this.fromJsonObject(reference.metadata),
+      createdAt: reference.createdAt.toISOString(),
+      updatedAt: reference.updatedAt.toISOString(),
+      lastSeenAt: reference.lastSeenAt?.toISOString(),
+    };
+  }
+
+  private toNullableJsonValue(value?: object | null): Prisma.NullableJsonNullValueInput | Prisma.InputJsonValue | undefined {
+    if (value === undefined) {
+      return undefined;
+    }
+
+    if (value === null) {
+      return Prisma.JsonNull;
+    }
+
+    return value as Prisma.InputJsonValue;
+  }
+
+  private fromJsonObject(value: Prisma.JsonValue | null): JsonObject | undefined {
+    if (!value || Array.isArray(value) || typeof value !== 'object') {
+      return undefined;
+    }
+
+    return value as JsonObject;
+  }
+
+  private toDate(value?: string): Date {
+    return value ? new Date(value) : new Date();
+  }
+
+  private toNullableDate(value?: string): Date | null | undefined {
+    if (value === undefined) {
+      return undefined;
+    }
+
+    return value ? new Date(value) : null;
   }
 }

@@ -1,31 +1,36 @@
-// Persists normalized competitions in a filesystem-backed store for the spike.
-import path from 'node:path';
-
-import { JsonFileStore } from '../../../shared/utils/json-file-store';
+// Persists normalized competitions in MariaDB through Prisma using upsert by sourceId.
+import { prisma } from '../../../shared/prisma/prisma';
 import { Competition } from '../types/domain.types';
 
 export class CompetitionRepository {
-  private readonly store = new JsonFileStore<Competition>(
-    path.resolve(process.cwd(), '.data', 'futbol-aragon', 'normalized', 'competitions.json'),
-  );
-
   async saveMany(items: Competition[]): Promise<number> {
-    const existing = await this.store.readAll();
-    const existingBySourceId = new Map(existing.map((item) => [item.sourceId, item]));
-    const nextBySourceId = new Map(existing.map((item) => [item.sourceId, item]));
-
-    for (const incoming of items) {
-      const persisted = existingBySourceId.get(incoming.sourceId);
-
-      nextBySourceId.set(incoming.sourceId, {
-        ...persisted,
-        ...incoming,
-        id: persisted?.id ?? incoming.id,
-        sourceId: incoming.sourceId,
+    for (const item of items) {
+      await prisma.competition.upsert({
+        where: {
+          sourceId: item.sourceId,
+        },
+        update: {
+          teamId: item.teamId,
+          name: item.name,
+          season: item.season,
+          sourceSystem: item.sourceSystem,
+          externalCode: item.externalCode,
+          groupName: item.groupName,
+          status: item.status,
+        },
+        create: {
+          id: item.id,
+          sourceId: item.sourceId,
+          teamId: item.teamId,
+          name: item.name,
+          season: item.season,
+          sourceSystem: item.sourceSystem,
+          externalCode: item.externalCode,
+          groupName: item.groupName,
+          status: item.status,
+        },
       });
     }
-
-    await this.store.writeAll(Array.from(nextBySourceId.values()));
 
     return items.length;
   }

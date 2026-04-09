@@ -1,0 +1,247 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum CompetitionStatus {
+  active
+  inactive
+}
+
+enum RoundStatus {
+  scheduled
+  in_progress
+  completed
+}
+
+enum MatchStatus {
+  scheduled
+  in_progress
+  played
+  final
+  provisional
+}
+
+enum SyncRunStatus {
+  running
+  completed
+  completed_with_warnings
+  failed
+}
+
+enum SyncBatchRunStatus {
+  running
+  success
+  partial_success
+  failed
+}
+
+model Team {
+  id        String   @id @db.VarChar(128)
+  clubId    String   @db.VarChar(128)
+  name      String?  @db.VarChar(255)
+  slug      String?  @db.VarChar(255)
+  season    String?  @db.VarChar(64)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  competitions Competition[]
+  calendars    Calendar[]
+  syncRuns     SyncRun[]
+
+  @@index([clubId])
+  @@index([active])
+  @@map("teams")
+}
+
+model Competition {
+  id           String   @id @db.VarChar(128)
+  sourceId     String   @unique @db.VarChar(128)
+  teamId       String   @db.VarChar(128)
+  name         String   @db.VarChar(255)
+  season       String   @db.VarChar(64)
+  sourceSystem String?  @db.VarChar(64)
+  externalCode String?  @db.VarChar(128)
+  groupName    String?  @db.VarChar(255)
+  status       CompetitionStatus?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  team       Team       @relation(fields: [teamId], references: [id])
+  calendars  Calendar[]
+  standings  Standing[]
+
+  @@index([teamId])
+  @@index([status])
+  @@map("competitions")
+}
+
+model Calendar {
+  id            String   @id @db.VarChar(128)
+  sourceId      String   @unique @db.VarChar(128)
+  competitionId String   @db.VarChar(128)
+  teamId        String   @db.VarChar(128)
+  name          String   @db.VarChar(255)
+  seasonLabel   String?  @db.VarChar(128)
+  visibleContext String? @db.VarChar(255)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  competition Competition @relation(fields: [competitionId], references: [id])
+  team        Team        @relation(fields: [teamId], references: [id])
+  rounds      Round[]
+
+  @@index([competitionId])
+  @@index([teamId])
+  @@map("calendars")
+}
+
+model Round {
+  id         String   @id @db.VarChar(128)
+  sourceId   String   @unique @db.VarChar(128)
+  calendarId String   @db.VarChar(128)
+  name       String   @db.VarChar(255)
+  roundOrder Int
+  number     Int?
+  dateLabel  String?  @db.VarChar(64)
+  status     RoundStatus?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  calendar Calendar @relation(fields: [calendarId], references: [id])
+  matches  Match[]
+
+  @@index([calendarId])
+  @@index([status])
+  @@index([roundOrder])
+  @@index([number])
+  @@map("rounds")
+}
+
+model Match {
+  id           String   @id @db.VarChar(128)
+  sourceId     String   @unique @db.VarChar(128)
+  roundId      String   @db.VarChar(128)
+  homeTeamName String   @db.VarChar(255)
+  awayTeamName String   @db.VarChar(255)
+  kickoffAt    String   @db.VarChar(64)
+  status       MatchStatus
+  result       String?  @db.VarChar(64)
+  homeScore    Int?
+  awayScore    Int?
+  venue        String?  @db.VarChar(255)
+  sourceUrl    String?  @db.Text
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  round Round @relation(fields: [roundId], references: [id])
+
+  @@index([roundId])
+  @@index([status])
+  @@map("matches")
+}
+
+model Standing {
+  id             String   @id @db.VarChar(128)
+  sourceId       String   @db.VarChar(128)
+  competitionId  String   @db.VarChar(128)
+  teamName       String   @db.VarChar(255)
+  position       Int
+  points         Int
+  played         Int?
+  won            Int?
+  drawn          Int?
+  lost           Int?
+  goalsFor       Int?
+  goalsAgainst   Int?
+  goalDifference Int?
+  sourceUrl      String?  @db.Text
+  capturedAt     DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  competition Competition @relation(fields: [competitionId], references: [id])
+
+  @@index([competitionId])
+  @@index([capturedAt])
+  @@index([competitionId, capturedAt])
+  @@map("standings")
+}
+
+model SourceReference {
+  id             String   @id @db.VarChar(128)
+  // `entity` is the currently used discriminator in the application layer.
+  // `entityType` is kept temporarily for compatibility with the spike code and persisted JSON history.
+  entity         String   @db.VarChar(64)
+  entityType     String?  @db.VarChar(64)
+  internalId     String   @db.VarChar(128)
+  internalName   String?  @db.VarChar(255)
+  sourceId       String?  @db.VarChar(128)
+  sourceName     String?  @db.VarChar(255)
+  sourceClubName String?  @db.VarChar(255)
+  sourceSystem   String?  @db.VarChar(64)
+  sourceEntityType String? @db.VarChar(64)
+  sourceUrl      String?  @db.Text
+  navigation     Json?
+  notes          String?  @db.Text
+  metadata       Json?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  lastSeenAt     DateTime?
+
+  @@index([internalId])
+  @@index([entity])
+  @@index([entityType])
+  @@index([sourceSystem])
+  @@index([sourceId])
+  @@index([internalId, entity, sourceSystem])
+  @@index([internalId, entityType, sourceSystem])
+  @@map("source_references")
+}
+
+model SyncRun {
+  id           String   @id @db.VarChar(128)
+  teamId       String   @db.VarChar(128)
+  sourceSystem String?  @db.VarChar(64)
+  accessMode   String?  @db.VarChar(32)
+  status       SyncRunStatus
+  startedAt    DateTime
+  finishedAt   DateTime?
+  summary      Json?
+  errorMessage String?  @db.Text
+  issues       Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  team Team @relation(fields: [teamId], references: [id])
+
+  @@index([teamId])
+  @@index([status])
+  @@index([startedAt])
+  @@map("sync_runs")
+}
+
+model SyncBatchRun {
+  id           String   @id @db.VarChar(128)
+  startedAt    DateTime
+  finishedAt   DateTime?
+  status       SyncBatchRunStatus
+  totalTeams   Int
+  successCount Int
+  partialCount Int
+  failedCount  Int
+  teamIds      Json
+  summary      Json?
+  errorMessage String?  @db.Text
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([status])
+  @@index([startedAt])
+  @@map("sync_batch_runs")
+}
