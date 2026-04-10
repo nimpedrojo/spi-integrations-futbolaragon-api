@@ -1,4 +1,6 @@
 // Implements a lightweight fetch-based HTTP client with timeout and retry support.
+import iconv from 'iconv-lite';
+
 import { logger, Logger } from '../logger/logger';
 import { CookieJar } from './cookie-jar';
 import { HttpClient, HttpRequest, HttpResponse } from './http-client';
@@ -14,6 +16,10 @@ export type FetchHttpClientOptions = {
 
 const RETRYABLE_STATUS_CODES = new Set([408, 429, 500, 502, 503, 504]);
 const REDIRECT_STATUS_CODES = new Set([301, 302, 303, 307, 308]);
+const HTML_META_CHARSET_REGEX =
+  /<meta[^>]+charset\s*=\s*["']?\s*([a-zA-Z0-9._-]+)\s*["']?[^>]*>/i;
+const HTML_META_CONTENT_TYPE_REGEX =
+  /<meta[^>]+content\s*=\s*["'][^"']*charset\s*=\s*([a-zA-Z0-9._-]+)[^"']*["'][^>]*>/i;
 
 export class FetchHttpClient implements HttpClient {
   private readonly baseUrl: string;
@@ -167,13 +173,22 @@ export class FetchHttpClient implements HttpClient {
       });
     }
 
-    const body = (await response.text()) as TBody;
+    const rawBody = Buffer.from(await response.arrayBuffer());
+    const headers = this.mapHeaders(response.headers, setCookieHeaders);
+    const charset = this.resolveResponseCharset(headers, rawBody);
+    const body = this.decodeBody(rawBody, charset) as TBody;
+
+    this.logger.info('Decoded HTTP response body', {
+      url: options.url,
+      statusCode: response.status,
+      charset,
+    });
 
     return {
       url: options.url,
       statusCode: response.status,
       body,
-      headers: this.mapHeaders(response.headers, setCookieHeaders),
+      headers,
       durationMs: Date.now() - startedAt,
     };
   }
@@ -235,6 +250,83 @@ export class FetchHttpClient implements HttpClient {
     const rawSetCookie = headers.get('set-cookie');
 
     return rawSetCookie ? [rawSetCookie] : [];
+  }
+
+  private resolveResponseCharset(
+    headers: Record<string, string | string[] | undefined>,
+    rawBody: Buffer,
+  ): string {
+    const headerCharset = this.extractCharsetFromContentType(headers['content-type']);
+
+    if (headerCharset) {
+      return headerCharset;
+    }
+
+    const metaCharset = this.extractCharsetFromHtmlMeta(rawBody);
+
+    if (metaCharset) {
+      return metaCharset;
+    }
+
+    return 'utf-8';
+  }
+
+  private extractCharsetFromContentType(header: string | string[] | undefined): string | null {
+    const value = Array.isArray(header) ? header[0] : header;
+
+    if (!value) {
+      return null;
+    }
+
+    const match = value.match(/charset\s*=\s*([^;]+)/i);
+
+    return this.normalizeCharset(match?.[1] ?? null);
+  }
+
+  private extractCharsetFromHtmlMeta(rawBody: Buffer): string | null {
+    const headSnippet = rawBody.subarray(0, 4096).toString('latin1');
+    const directCharsetMatch = headSnippet.match(HTML_META_CHARSET_REGEX);
+
+    if (directCharsetMatch?.[1]) {
+      return this.normalizeCharset(directCharsetMatch[1]);
+    }
+
+    const contentTypeMatch = headSnippet.match(HTML_META_CONTENT_TYPE_REGEX);
+
+    return this.normalizeCharset(contentTypeMatch?.[1] ?? null);
+  }
+
+  private normalizeCharset(charset: string | null): string | null {
+    if (!charset) {
+      return null;
+    }
+
+    const normalized = charset.trim().replace(/^["']|["']$/g, '').toLowerCase();
+
+    switch (normalized) {
+      case 'utf8':
+        return 'utf-8';
+      case 'latin1':
+      case 'latin-1':
+      case 'iso8859-1':
+        return 'iso-8859-1';
+      case 'iso8859-15':
+        return 'iso-8859-15';
+      case 'cp1252':
+        return 'windows-1252';
+      default:
+        return normalized;
+    }
+  }
+
+  private decodeBody(rawBody: Buffer, charset: string): string {
+    if (iconv.encodingExists(charset)) {
+      return iconv.decode(rawBody, charset);
+    }
+
+    this.logger.info('Unsupported response charset, falling back to utf-8', { charset });
+
+    return rawBody.toString('utf8');
   }
 
   private resolveRedirectMethod(statusCode: number, method: HttpRequest['method']): HttpRequest['method'] {
